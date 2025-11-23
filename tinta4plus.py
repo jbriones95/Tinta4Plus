@@ -43,6 +43,10 @@ class EInkControlGUI:
     DISPLAY_OLED = "eDP-1"
     DISPLAY_EINK = "eDP-2"
 
+    # E-Ink privacy image (displayed when disabling E-Ink to clear private data)
+    # NOTE: must install feh and imv for this to work!
+    EINK_DISABLED_IMAGE = "eink-disable.jpg"
+
     """Main GUI application using tkinter"""
     
     def __init__(self, root, HELPER_SCRIPT, logger):
@@ -51,18 +55,21 @@ class EInkControlGUI:
         self.root = root
         self.root.title("ThinkBook E-Ink Control")
         self.root.geometry("600x700")
-        
+
         # Helper client
         self.helper = HelperClient(logger)
         self.keepalive_after_id = None
         self.helper_process = None
-        
+
         # Managers
         self.display_mgr = DisplayManager(logger)
         self.wacom_mgr = WacomManager(logger)
-        
+
         # Brightness timer for debouncing
         self.brightness_timer = None
+
+        # Image viewer process for E-Ink privacy screen
+        self.eink_image_process = None
         
         # Build UI
         self.build_ui()
@@ -548,22 +555,76 @@ class EInkControlGUI:
         enabled = self.eink_enabled_var.get()
         # Toggle the state
         enabled = not enabled
-        command = 'enable-eink' if enabled else 'disable-eink'
 
-        self.log_message(f"{'Enabling' if enabled else 'Disabling'} E-Ink display...")
-        response = self.execute_helper_command(command)
+        if enabled:
+            # Enabling E-Ink
+            self.log_message("Enabling E-Ink display...")
+            response = self.execute_helper_command('enable-eink')
 
-        if response:
-            self.eink_enabled_var.set(enabled)
-            # Update button appearance
-            if enabled:
+            if response:
+                self.eink_enabled_var.set(True)
                 self.eink_toggle_btn.config(text="eInk Enabled", bg="green", fg="white")
-            else:
-                self.eink_toggle_btn.config(text="eInk Disabled", bg="yellow", fg="black")
-            self.update_status(f"E-Ink display {'enabled' if enabled else 'disabled'}")
+                self.update_status("E-Ink display enabled")
         else:
-            # Keep current state on failure
-            pass
+            # Disabling E-Ink - display privacy image first
+            self.log_message("Preparing to disable E-Ink display...")
+
+            # Step 1: Display privacy image on E-Ink screen
+            image_path = self.EINK_DISABLED_IMAGE
+            if not os.path.exists(image_path):
+                # Try in script directory
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(script_dir, self.EINK_DISABLED_IMAGE)
+
+            if os.path.exists(image_path):
+                self.log_message(f"Displaying privacy image on {self.DISPLAY_EINK}...")
+                self.eink_image_process = self.display_mgr.display_fullscreen_image(
+                    self.DISPLAY_EINK,
+                    image_path
+                )
+
+                if self.eink_image_process:
+                    # Step 2: Wait for image to fully render on E-Ink
+                    self.log_message("Waiting for image to render...")
+                    time.sleep(2.0)  # Give E-Ink time to display the image
+                else:
+                    self.log_message("Warning: Could not display privacy image", level='error')
+            else:
+                self.log_message(f"Warning: Privacy image not found: {self.EINK_DISABLED_IMAGE}", level='error')
+
+            # Step 3: Disable E-Ink via USB controller
+            self.log_message("Disabling E-Ink display via USB controller...")
+            response = self.execute_helper_command('disable-eink')
+
+            if response:
+                self.eink_enabled_var.set(False)
+                self.eink_toggle_btn.config(text="eInk Disabled", bg="yellow", fg="black")
+                self.update_status("E-Ink display disabled")
+
+                # Step 4: Kill the image viewer process (image is now persisted on E-Ink)
+                if self.eink_image_process:
+                    try:
+                        self.eink_image_process.terminate()
+                        self.eink_image_process.wait(timeout=2)
+                        self.log_message("Closed image viewer (image persisted on E-Ink)")
+                    except:
+                        try:
+                            self.eink_image_process.kill()
+                        except:
+                            pass
+                    self.eink_image_process = None
+            else:
+                # Failed to disable - kill image viewer
+                if self.eink_image_process:
+                    try:
+                        self.eink_image_process.terminate()
+                        self.eink_image_process.wait(timeout=2)
+                    except:
+                        try:
+                            self.eink_image_process.kill()
+                        except:
+                            pass
+                    self.eink_image_process = None
     
     def on_refresh_full(self):
         """Perform full E-Ink refresh"""

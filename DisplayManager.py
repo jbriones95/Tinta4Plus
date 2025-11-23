@@ -10,6 +10,8 @@ By downloading and using this software you agree to these terms and acknowledge 
 """
 
 import subprocess
+import os
+import time
 
 
 class DisplayManager:
@@ -81,4 +83,133 @@ class DisplayManager:
             return True
         except Exception as e:
             self.logger.error(f"Failed to disable display: {e}")
+            return False
+
+    def get_display_geometry(self, display_name):
+        """Get the geometry (position and size) of a display using xrandr"""
+        try:
+            result = subprocess.run(
+                ['xrandr', '--query'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            # Parse xrandr output to find the display geometry
+            # Format: "eDP-2 connected 1200x1920+1920+0 ..."
+            for line in result.stdout.split('\n'):
+                if display_name in line and 'connected' in line:
+                    # Look for the geometry pattern: WIDTHxHEIGHT+X+Y
+                    parts = line.split()
+                    for part in parts:
+                        if 'x' in part and '+' in part:
+                            # Parse geometry: 1200x1920+1920+0
+                            geo = part.split('+')
+                            size = geo[0].split('x')
+                            width = int(size[0])
+                            height = int(size[1])
+                            x_offset = int(geo[1]) if len(geo) > 1 else 0
+                            y_offset = int(geo[2]) if len(geo) > 2 else 0
+
+                            return {
+                                'width': width,
+                                'height': height,
+                                'x': x_offset,
+                                'y': y_offset
+                            }
+
+            self.logger.warning(f"Could not find geometry for {display_name}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Failed to get display geometry: {e}")
+            return None
+
+    def display_fullscreen_image(self, display_name, image_path):
+        """
+        Display a fullscreen image on a specific display.
+        Works on X11 using feh, or falls back to imv for Wayland support.
+
+        Args:
+            display_name: Name of the display (e.g., 'eDP-2')
+            image_path: Path to the PNG image file
+
+        Returns:
+            subprocess.Popen object if successful, None otherwise
+        """
+        if not os.path.exists(image_path):
+            self.logger.error(f"Image file not found: {image_path}")
+            return None
+
+        # Get display geometry
+        geometry = self.get_display_geometry(display_name)
+        if not geometry:
+            self.logger.error(f"Could not determine geometry for {display_name}")
+            return None
+
+        self.logger.info(f"Display {display_name} geometry: {geometry['width']}x{geometry['height']}+{geometry['x']}+{geometry['y']}")
+
+        # Try feh first (works great on X11)
+        if self._command_exists('feh'):
+            try:
+                # feh command to display fullscreen image at specific position
+                cmd = [
+                    'feh',
+                    '--borderless',
+                    '--no-menus',
+                    '--geometry', f"{geometry['width']}x{geometry['height']}+{geometry['x']}+{geometry['y']}",
+                    '--scale-down',
+                    '--auto-zoom',
+                    image_path
+                ]
+
+                self.logger.info(f"Displaying image on {display_name} using feh")
+                process = subprocess.Popen(cmd)
+
+                # Give it a moment to display
+                time.sleep(0.5)
+
+                return process
+
+            except Exception as e:
+                self.logger.error(f"Failed to display image with feh: {e}")
+
+        # Try imv as fallback (works on both X11 and Wayland)
+        elif self._command_exists('imv'):
+            try:
+                cmd = [
+                    'imv',
+                    '-f',  # fullscreen
+                    image_path
+                ]
+
+                self.logger.info(f"Displaying image using imv (fullscreen mode)")
+                self.logger.warning("imv may not position on correct display automatically")
+                process = subprocess.Popen(cmd)
+
+                time.sleep(0.5)
+                return process
+
+            except Exception as e:
+                self.logger.error(f"Failed to display image with imv: {e}")
+
+        else:
+            self.logger.error("Neither feh nor imv is installed. Please install one:")
+            self.logger.error("  For X11: sudo apt install feh")
+            self.logger.error("  For Wayland: sudo apt install imv")
+            return None
+
+        return None
+
+    def _command_exists(self, command):
+        """Check if a command exists in PATH"""
+        try:
+            subprocess.run(
+                ['which', command],
+                capture_output=True,
+                check=True,
+                timeout=2
+            )
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return False
