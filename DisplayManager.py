@@ -202,6 +202,7 @@ class DisplayManager:
         if self._command_exists('feh'):
             try:
                 # feh command to display fullscreen image at specific position
+                # Using borderless and window hints to cover taskbar
                 cmd = [
                     'feh',
                     '--borderless',
@@ -209,6 +210,7 @@ class DisplayManager:
                     '--geometry', f"{geometry['width']}x{geometry['height']}+{geometry['x']}+{geometry['y']}",
                     '--scale-down',
                     '--auto-zoom',
+                    '--class', 'feh-fullscreen',  # Set window class for easy identification
                     image_path
                 ]
 
@@ -216,7 +218,19 @@ class DisplayManager:
                 process = subprocess.Popen(cmd)
 
                 # Give it a moment to display
-                time.sleep(0.5)
+                time.sleep(0.3)
+
+                # Use wmctrl to set the window to be above all others and skip taskbar
+                if self._command_exists('wmctrl'):
+                    try:
+                        # Wait a bit more for window to be created
+                        time.sleep(0.2)
+                        # Set window to be above all others and fullscreen state
+                        subprocess.run(['wmctrl', '-r', 'feh-fullscreen', '-b', 'add,above,fullscreen'],
+                                     timeout=2, capture_output=True)
+                        self.logger.info("Set feh window to be above all other windows")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to set window properties with wmctrl: {e}")
 
                 return process
 

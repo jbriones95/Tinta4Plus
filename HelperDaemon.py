@@ -197,7 +197,9 @@ class HelperDaemon:
                 if not self.ec.access_available:
                     raise RuntimeError(self.ec.error_message or "EC access not available")
 
-                success, readback = self.ec.enable_frontlight()
+                # Get optional brightness level parameter
+                brightness_level = params.get('brightness_level')
+                success, readback = self.ec.enable_frontlight(brightness_level=brightness_level)
                 response['success'] = success
                 response['readback'] = f"0x{readback:02x}"
                 response['message'] = 'Frontlight enabled' if success else 'Frontlight enable failed (readback mismatch)'
@@ -377,7 +379,7 @@ def main():
     # Setup logging
     log_handlers = [
         logging.StreamHandler(sys.stderr),  # Console output
-        logging.FileHandler('/tmp/TintaHelper.log')  # File output
+        logging.FileHandler('/tmp/TintaHelper.log', mode='w')  # File output (overwrite mode)
     ]
 
     logging.basicConfig(

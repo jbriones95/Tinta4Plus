@@ -12,19 +12,21 @@ WARNING: This software may temporarily or permanently render your hardware inope
 REQUIREMENTS AND RISKS:
 1. Ubuntu / Xubuntu 25.04 "Plucky" with XFCE4 desktop environment is required (Xubuntu / XFCE4 only)
 
-2. Frontlight control requires access to the embedded controller (EC) which requires disabling Secure Boot in the BIOS. Disabling Secure Boot may reduce system security and expose you to certain types of attacks, including viruses, ransomware, rootkits and bootkits.
+2. Xorg (X11) windowing system, not Wayland. The software has not been tested to work with Wayland.
 
-3. Root access is required to write to the EC
+3. Frontlight control requires access to the embedded controller (EC) which requires disabling Secure Boot in the BIOS. Disabling Secure Boot may reduce system security and expose you to certain types of attacks, including viruses, ransomware, rootkits and bootkits.
 
-4. This software writes to low-level hardware, including the EC and the eInk display's T-CON
+4. Root access is required to write to the EC
 
-5. The software can potentially cause temporary or permanent damage to your hardware or data loss.
+5. This software writes to low-level hardware, including the EC and the eInk display's T-CON
 
-6. Should issues occur, usually a reboot is sufficient, but in some cases a full EC reset may be required. Hardware damage is theoretically possible.
+6. The software can potentially cause temporary or permanent damage to your hardware or data loss.
 
-7. This software was created without any input, endorcement or documentation from eInk or Lenovo and has been tested only on a single laptop. It is currently unknown whether it works correctly on different hardware revisions of the same laptop series.
+7. Should issues occur, usually a reboot is sufficient, but in some cases a full EC reset may be required. Hardware damage is theoretically possible.
 
-8. If the privacy image fails to properly display when switching from eInk to OLED screens, or if the software crashes or powers off before the privacy image sequence can complete, the eInk display will show a persistent image of the last screen until a full reboot. This could potentially expose personal information such as passwords, financial information, proprietary information like intellectual property or information that is embrassing to the user. Therefore, always ensure that the eInk display has been cleared of such information after use, and if not, perform a full reboot.
+8. This software was created without any input, endorcement or documentation from eInk or Lenovo and has been tested only on a single laptop. It is currently unknown whether it works correctly on different hardware revisions of the same laptop series.
+
+9. If the privacy image fails to properly display when switching from eInk to OLED screens, or if the software crashes or powers off before the privacy image sequence can complete, the eInk display will show a persistent image of the last screen until a full reboot. This could potentially expose personal information such as passwords, financial information, proprietary information like intellectual property or information that is embrassing to the user. Therefore, always ensure that the eInk display has been cleared of such information after use, and if not, perform a full reboot.
 
 DO NOT MODIFY THE CODE IN ECController.py or EInkUSBController.py, as doing so may cause hardware damage.
 
@@ -36,7 +38,7 @@ The author is not responsible for any damage, data loss, lost productivity, or o
 INSTRUCTIONS FOR USE:
 1. This software has been tested only on the Lenovo ThinkBook Plus Gen 4 IRU laptop. It will not work on any other.
 
-2. The only supported Linux distribution is Ubuntu/Xubuntu 25.04 "Plucky" running XFCE4 desktop environment (Xubuntu). It will not work properly with GNOME and has not been tested with any other configuration. Therefore, you first need to install Xubuntu and make it the default dekstop prior to use.
+2. The only supported Linux distribution is Ubuntu/Xubuntu 25.04 "Plucky" running XFCE4 desktop environment (Xubuntu) and Xorg (not Wayland). It will not work properly with GNOME and has not been tested with any other configuration. Therefore, you first need to install Xubuntu and make it the default dekstop prior to use.
 
 3. To use frontlight controls, first disable Secure Boot in the BIOS settings by pressing ENTER immediately after powering on the laptop.
 

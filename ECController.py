@@ -264,18 +264,27 @@ class ECController:
         
         return success, readback
     
-    def enable_frontlight(self):
+    def enable_frontlight(self, brightness_level=None):
         """
-        Enable frontlight power
+        Enable frontlight power and optionally set brightness
+        Args:
+            brightness_level: Optional brightness level (0-8) to set after enabling
         Returns: (success, readback_value)
         """
         self.logger.info("Enabling frontlight")
         readback = self.write_and_verify(self.REG_POWER, 0x0A)
         success = (readback == 0x06)
-        
+
         if not success:
             self.logger.warning(f"Frontlight enable readback mismatch: expected 0x06, read 0x{readback:02x}")
-        
+        else:
+            # If frontlight was successfully enabled and brightness level was provided, set it
+            if brightness_level is not None:
+                self.logger.info(f"Setting brightness to {brightness_level} after enabling frontlight")
+                brightness_success, brightness_readback = self.set_brightness(brightness_level)
+                if not brightness_success:
+                    self.logger.warning(f"Failed to set brightness after enabling frontlight")
+
         return success, readback
     
     def disable_frontlight(self):
@@ -285,7 +294,7 @@ class ECController:
         """
         self.logger.info("Disabling frontlight")
         readback = self.write_and_verify(self.REG_POWER, 0x05)
-        success = (readback == 0x05)
+        success = (readback == 0x05 or readback == 0x09)
         
         if not success:
             self.logger.warning(f"Frontlight disable readback mismatch: wrote 0x05, read 0x{readback:02x}")

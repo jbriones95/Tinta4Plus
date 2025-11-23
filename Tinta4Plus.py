@@ -94,9 +94,6 @@ class EInkControlGUI:
         style = ttk.Style()
         style.theme_use('clam')  # Modern look
 
-        # Store frontlight control widgets for enabling/disabling
-        self.frontlight_widgets = []
-        
         # Main frame with padding
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -179,22 +176,12 @@ class EInkControlGUI:
         frontlight_frame.columnconfigure(1, weight=1)
         row += 1
 
-        # Power toggle
-        ttk.Label(frontlight_frame, text="Power:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-
-        self.frontlight_var = tk.BooleanVar(value=False)
-        frontlight_check = ttk.Checkbutton(frontlight_frame, text="Enable",
-                                          variable=self.frontlight_var,
-                                          command=self.on_frontlight_toggled)
-        frontlight_check.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        self.frontlight_widgets.append(frontlight_check)
-
-        # Brightness slider
-        ttk.Label(frontlight_frame, text="Brightness (0-8):").grid(row=1, column=0,
+        # Brightness slider (frontlight auto-enables with eInk)
+        ttk.Label(frontlight_frame, text="Brightness (0-8):").grid(row=0, column=0,
                                                                     sticky=tk.W, padx=5, pady=5)
 
         brightness_container = ttk.Frame(frontlight_frame)
-        brightness_container.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        brightness_container.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         brightness_container.columnconfigure(0, weight=1)
 
         self.brightness_var = tk.IntVar(value=4)
@@ -203,7 +190,6 @@ class EInkControlGUI:
                                          variable=self.brightness_var,
                                          command=self.on_brightness_changed)
         self.brightness_scale.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        self.frontlight_widgets.append(self.brightness_scale)
 
         self.brightness_label = ttk.Label(brightness_container, text="4")
         self.brightness_label.grid(row=0, column=1, padx=(5, 0))
@@ -261,24 +247,35 @@ class EInkControlGUI:
         self.log_message("Application started")
     
     def log_message(self, message, level='info'):
-        """Add a message to the log view"""
+        """Add a message to the log view and logger"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        
+
         # Determine tag based on message content or level
         if '✓' in message or 'success' in message.lower():
             tag = 'success'
+            logger_level = 'info'
         elif '✗' in message or 'error' in message.lower() or 'failed' in message.lower():
             tag = 'error'
+            logger_level = 'error'
         else:
             tag = level
-        
+            logger_level = level
+
         log_line = f"[{timestamp}] {message}\n"
-        
+
         # Insert into text widget
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, log_line, tag)
         self.log_text.see(tk.END)  # Auto-scroll
         self.log_text.config(state=tk.DISABLED)
+
+        # Also log via logger
+        if logger_level == 'error':
+            self.logger.error(message)
+        elif logger_level == 'warning':
+            self.logger.warning(message)
+        else:
+            self.logger.info(message)
     
     def update_status(self, message, error=False):
         """Update status bar"""
@@ -463,12 +460,11 @@ class EInkControlGUI:
                     self.log_message(f"⚠ {error_msg}", level='error')
 
                     # Show warning label
-                    self.secure_boot_warning.grid(row=2, column=0, columnspan=2,
+                    self.secure_boot_warning.grid(row=1, column=0, columnspan=2,
                                                  sticky=(tk.W, tk.E), padx=5, pady=10)
 
-                    # Disable all frontlight controls
-                    for widget in self.frontlight_widgets:
-                        widget.config(state='disabled')
+                    # Disable brightness slider (frontlight checkbox is already always disabled)
+                    self.brightness_scale.config(state='disabled')
 
                     # Show dialog
                     if ec_status.get('secure_boot_enabled'):
@@ -501,14 +497,7 @@ class EInkControlGUI:
             response = self.helper.send_command('get-frontlight-state')
 
             if response and response.get('success'):
-                enabled = response.get('frontlight_enabled')
                 brightness = response.get('brightness_level')
-
-                if enabled is not None:
-                    # Temporarily disable the callback to avoid triggering commands
-                    old_callback = self.frontlight_var.trace_info()
-                    self.frontlight_var.set(enabled)
-                    self.log_message(f"Synced frontlight power: {'ON' if enabled else 'OFF'}")
 
                 if brightness is not None:
                     self.brightness_var.set(brightness)
@@ -579,6 +568,16 @@ class EInkControlGUI:
                 self.eink_toggle_btn.config(text="eInk Enabled", bg="green", fg="white")
                 self.update_status("E-Ink display enabled")
 
+                # Step 3: Enable frontlight automatically with current brightness
+                self.log_message("Enabling frontlight for E-Ink display...")
+                brightness_level = self.brightness_var.get()
+                frontlight_response = self.execute_helper_command('enable-frontlight',
+                                                                  brightness_level=brightness_level)
+                if frontlight_response:
+                    self.log_message(f"✓ Frontlight enabled with brightness {brightness_level}")
+                else:
+                    self.log_message("⚠ Failed to enable frontlight (may not be available)", level='error')
+
                 # Small delay before disabling OLED
                 time.sleep(0.5)
 
@@ -623,6 +622,14 @@ class EInkControlGUI:
                 self.eink_enabled_var.set(False)
                 self.eink_toggle_btn.config(text="eInk Disabled", bg="yellow", fg="black")
                 self.update_status("E-Ink display disabled")
+
+                # Disable frontlight automatically when switching to OLED
+                self.log_message("Disabling frontlight...")
+                frontlight_response = self.execute_helper_command('disable-frontlight')
+                if frontlight_response:
+                    self.log_message("✓ Frontlight disabled")
+                else:
+                    self.log_message("⚠ Failed to disable frontlight", level='error')
 
                 time.sleep(2.0)  # Give E-Ink time to display the image
 
@@ -675,20 +682,6 @@ class EInkControlGUI:
         response = self.execute_helper_command('refresh-eink')
         if response:
             self.update_status("E-Ink refresh complete")
-    
-    def on_frontlight_toggled(self):
-        """Handle frontlight power toggle"""
-        enabled = self.frontlight_var.get()
-        command = 'enable-frontlight' if enabled else 'disable-frontlight'
-        
-        self.log_message(f"{'Enabling' if enabled else 'Disabling'} frontlight...")
-        response = self.execute_helper_command(command)
-        
-        if response:
-            self.update_status(f"Frontlight {'enabled' if enabled else 'disabled'}")
-        else:
-            # Revert checkbox on failure
-            self.frontlight_var.set(not enabled)
     
     def on_brightness_changed(self, value):
         """Handle brightness slider change"""
@@ -959,7 +952,7 @@ def main():
     # Setup logging
     log_handlers = [
         logging.StreamHandler(),  # Console output
-        logging.FileHandler('/tmp/tinta4plus.log')  # File output
+        logging.FileHandler('/tmp/tinta4plus.log', mode='w')  # File output (overwrite mode)
     ]
 
     logging.basicConfig(
