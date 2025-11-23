@@ -495,6 +495,9 @@ class EInkControlGUI:
             self.logger.error(f"Failed to check EC status: {e}")
             self.log_message(f"Warning: Could not verify EC status: {e}", level='error')
 
+        # Sync display checkboxes with actual hardware state
+        self.sync_display_state()
+
     def sync_frontlight_state(self):
         """Query EC and update GUI to match actual frontlight state"""
         try:
@@ -518,6 +521,23 @@ class EInkControlGUI:
         except Exception as e:
             self.logger.warning(f"Failed to sync frontlight state: {e}")
             self.log_message(f"Warning: Could not sync frontlight state from EC", level='error')
+
+    def sync_display_state(self):
+        """Query display manager and update GUI checkboxes to match actual display state"""
+        try:
+            # Check OLED display (eDP-1)
+            oled_active = self.display_mgr.is_display_active(self.DISPLAY_OLED)
+            self.oled_enabled_var.set(oled_active)
+            self.log_message(f"Synced OLED display ({self.DISPLAY_OLED}): {'enabled' if oled_active else 'disabled'}")
+
+            # Check E-Ink display (eDP-2)
+            eink_active = self.display_mgr.is_display_active(self.DISPLAY_EINK)
+            self.eink_display_var.set(eink_active)
+            self.log_message(f"Synced E-Ink display ({self.DISPLAY_EINK}): {'enabled' if eink_active else 'disabled'}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to sync display state: {e}")
+            self.log_message(f"Warning: Could not sync display state: {e}", level='error')
 
     def execute_helper_command(self, command, **params):
         """Execute a command via helper and handle response"""
@@ -565,6 +585,13 @@ class EInkControlGUI:
                 self.eink_enabled_var.set(True)
                 self.eink_toggle_btn.config(text="eInk Enabled", bg="green", fg="white")
                 self.update_status("E-Ink display enabled")
+
+                # Make E-Ink the primary display
+                self.log_message(f"Setting {self.DISPLAY_EINK} as primary display...")
+                if self.display_mgr.set_primary(self.DISPLAY_EINK):
+                    self.log_message(f"✓ {self.DISPLAY_EINK} is now the primary display")
+                else:
+                    self.log_message(f"⚠ Could not set {self.DISPLAY_EINK} as primary", level='error')
         else:
             # Disabling E-Ink - display privacy image first
             self.log_message("Preparing to disable E-Ink display...")
@@ -592,7 +619,14 @@ class EInkControlGUI:
             else:
                 self.log_message(f"Warning: Privacy image not found: {self.EINK_DISABLED_IMAGE}", level='error')
 
-            # Step 3: Disable E-Ink via USB controller
+            # Step 3: Make OLED the primary display
+            self.log_message(f"Setting {self.DISPLAY_OLED} as primary display...")
+            if self.display_mgr.set_primary(self.DISPLAY_OLED):
+                self.log_message(f"✓ {self.DISPLAY_OLED} is now the primary display")
+            else:
+                self.log_message(f"⚠ Could not set {self.DISPLAY_OLED} as primary", level='error')
+
+            # Step 4: Disable E-Ink via USB controller
             self.log_message("Disabling E-Ink display via USB controller...")
             response = self.execute_helper_command('disable-eink')
 
@@ -601,7 +635,7 @@ class EInkControlGUI:
                 self.eink_toggle_btn.config(text="eInk Disabled", bg="yellow", fg="black")
                 self.update_status("E-Ink display disabled")
 
-                # Step 4: Kill the image viewer process (image is now persisted on E-Ink)
+                # Step 5: Kill the image viewer process (image is now persisted on E-Ink)
                 if self.eink_image_process:
                     try:
                         self.eink_image_process.terminate()
@@ -759,7 +793,7 @@ class EInkControlGUI:
     def on_eink_display_toggled(self):
         """Handle E-Ink display enable/disable"""
         enabled = self.eink_display_var.get()
-        
+
         if enabled:
             self.log_message(f"Enabling E-Ink display ({self.DISPLAY_EINK})...")
             if self.display_mgr.enable_display(self.DISPLAY_EINK):

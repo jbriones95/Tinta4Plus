@@ -43,6 +43,32 @@ class DisplayManager:
             self.logger.error(f"Failed to get displays: {e}")
             return []
     
+    def is_display_active(self, display_name):
+        """Check if a display is currently active (enabled and has geometry)"""
+        try:
+            result = subprocess.run(
+                ['xrandr', '--query'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            for line in result.stdout.split('\n'):
+                if display_name in line and ' connected' in line:
+                    parts = line.split()
+                    # Display is active if it has geometry info (e.g., 1920x1080+0+0)
+                    # Look for pattern like "1920x1080+0+0" in the line
+                    for part in parts:
+                        if 'x' in part and '+' in part:
+                            return True
+                    return False
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to check display status: {e}")
+            return False
+
     def set_primary(self, display_name):
         """Set primary display"""
         try:
@@ -60,13 +86,24 @@ class DisplayManager:
     def enable_display(self, display_name):
         """Enable/turn on a display"""
         try:
+            # Run xrandr command (may produce spurious BadMatch errors on stderr)
             subprocess.run(
                 ['xrandr', '--output', display_name, '--auto'],
-                check=True,
+                capture_output=True,
                 timeout=5
             )
-            self.logger.info(f"Enabled display: {display_name}")
-            return True
+
+            # Verify the display is actually enabled by checking its state
+            # Give X11 a moment to apply the change
+            time.sleep(0.2)
+
+            if self.is_display_active(display_name):
+                self.logger.info(f"Enabled display: {display_name}")
+                return True
+            else:
+                self.logger.error(f"Failed to enable display: {display_name} (display not active after command)")
+                return False
+
         except Exception as e:
             self.logger.error(f"Failed to enable display: {e}")
             return False
@@ -74,13 +111,24 @@ class DisplayManager:
     def disable_display(self, display_name):
         """Disable/turn off a display"""
         try:
+            # Run xrandr command (may produce spurious BadMatch errors on stderr)
             subprocess.run(
                 ['xrandr', '--output', display_name, '--off'],
-                check=True,
+                capture_output=True,
                 timeout=5
             )
-            self.logger.info(f"Disabled display: {display_name}")
-            return True
+
+            # Verify the display is actually disabled by checking its state
+            # Give X11 a moment to apply the change
+            time.sleep(0.2)
+
+            if not self.is_display_active(display_name):
+                self.logger.info(f"Disabled display: {display_name}")
+                return True
+            else:
+                self.logger.error(f"Failed to disable display: {display_name} (display still active after command)")
+                return False
+
         except Exception as e:
             self.logger.error(f"Failed to disable display: {e}")
             return False
