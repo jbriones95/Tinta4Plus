@@ -69,26 +69,26 @@ class DisplayManager:
             self.logger.error(f"Failed to check display status: {e}")
             return False
 
-    def set_primary(self, display_name):
-        """Set primary display"""
+    def enable_display(self, display_name, scale=None):
+        """Enable/turn on a display with optional scaling
+
+        Args:
+            display_name: Name of the display (e.g., 'eDP-1', 'eDP-2')
+            scale: Optional scale factor (e.g., 1.75 for 175% scaling to make text larger)
+                   NOTE: xrandr --scale works inversely, so we calculate 1/scale
+        """
         try:
-            subprocess.run(
-                ['xrandr', '--output', display_name, '--primary'],
-                check=True,
-                timeout=5
-            )
-            self.logger.info(f"Set {display_name} as primary display")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to set primary display: {e}")
-            return False
-    
-    def enable_display(self, display_name):
-        """Enable/turn on a display"""
-        try:
+            # Build xrandr command with scaling if specified
+            cmd = ['xrandr', '--output', display_name, '--auto']
+            if scale is not None:
+                # xrandr --scale works inversely: to make things appear larger (1.75x),
+                # we need to use the inverse scale (1/1.75 = 0.571)
+                inverse_scale = 1.0 / scale
+                cmd.extend(['--scale', f'{inverse_scale}x{inverse_scale}'])
+
             # Run xrandr command (may produce spurious BadMatch errors on stderr)
             subprocess.run(
-                ['xrandr', '--output', display_name, '--auto'],
+                cmd,
                 capture_output=True,
                 timeout=5
             )
@@ -98,7 +98,8 @@ class DisplayManager:
             time.sleep(0.2)
 
             if self.is_display_active(display_name):
-                self.logger.info(f"Enabled display: {display_name}")
+                scale_info = f" with {scale}x scale" if scale else ""
+                self.logger.info(f"Enabled display: {display_name}{scale_info}")
                 return True
             else:
                 self.logger.error(f"Failed to enable display: {display_name} (display not active after command)")

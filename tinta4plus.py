@@ -26,6 +26,7 @@ import os
 import time
 import threading
 import logging
+import webbrowser
 from datetime import datetime
 
 from HelperClient import HelperClient
@@ -70,7 +71,10 @@ class EInkControlGUI:
 
         # Image viewer process for E-Ink privacy screen
         self.eink_image_process = None
-        
+
+        # Display scaling (1.75x default for comfortable viewing on high-DPI displays)
+        self.display_scale = 1.75
+
         # Build UI
         self.build_ui()
         
@@ -141,35 +145,25 @@ class EInkControlGUI:
         self.btn_refresh = ttk.Button(display_frame, text="Full Refresh (Clear Ghost)",
                                       command=self.on_refresh_full)
         self.btn_refresh.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky=(tk.W, tk.E))
-        
-        # Display enable/disable controls
-        display_control_frame = ttk.Frame(display_frame)
-        display_control_frame.grid(row=2, column=0, columnspan=2, padx=5, pady=(10, 5), sticky=(tk.W, tk.E))
-        display_control_frame.columnconfigure(0, weight=1)
-        display_control_frame.columnconfigure(1, weight=1)
-        
-        # OLED display control
-        oled_control = ttk.Frame(display_control_frame)
-        oled_control.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
-        
-        ttk.Label(oled_control, text="OLED (eDP-1):").pack(side=tk.LEFT, padx=(0, 5))
-        self.oled_enabled_var = tk.BooleanVar(value=True)
-        oled_check = ttk.Checkbutton(oled_control, text="Enable", 
-                                    variable=self.oled_enabled_var,
-                                    command=self.on_oled_toggled)
-        oled_check.pack(side=tk.LEFT)
-        
-        # E-Ink display control
-        eink_control = ttk.Frame(display_control_frame)
-        eink_control.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
-        
-        ttk.Label(eink_control, text="E-Ink (eDP-2):").pack(side=tk.LEFT, padx=(0, 5))
-        self.eink_display_var = tk.BooleanVar(value=True)
-        eink_check = ttk.Checkbutton(eink_control, text="Enable", 
-                                    variable=self.eink_display_var,
-                                    command=self.on_eink_display_toggled)
-        eink_check.pack(side=tk.LEFT)
-        
+
+        # Display scale slider
+        scale_label = ttk.Label(display_frame, text="Display Scale:")
+        scale_label.grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+
+        scale_container = ttk.Frame(display_frame)
+        scale_container.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        scale_container.columnconfigure(0, weight=1)
+
+        self.scale_var = tk.DoubleVar(value=1.75)
+        self.scale_slider = ttk.Scale(scale_container, from_=1.0, to=2.0,
+                                     orient=tk.HORIZONTAL,
+                                     variable=self.scale_var,
+                                     command=self.on_scale_changed)
+        self.scale_slider.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+        self.scale_label = ttk.Label(scale_container, text="1.75")
+        self.scale_label.grid(row=0, column=1, padx=(5, 0))
+
         # === Frontlight Control Section ===
         frontlight_frame = ttk.LabelFrame(main_frame, text="Frontlight Control", padding="10")
         frontlight_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=5)
@@ -210,35 +204,7 @@ class EInkControlGUI:
                                              text="⚠ Secure Boot is enabled. Frontlight controls disabled.\nPlease disable Secure Boot in BIOS (Press ENTER during boot).",
                                              foreground='red', font=('TkDefaultFont', 9, 'bold'))
         # Don't grid it yet - will be shown if needed
-        
-        # === Touch Control Section ===
-        touch_frame = ttk.LabelFrame(main_frame, text="Touch Input Control", padding="10")
-        touch_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=5)
-        touch_frame.columnconfigure(1, weight=1)
-        row += 1
-        
-        # E-Ink touch control
-        ttk.Label(touch_frame, text="E-Ink Touch (Goodix):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        
-        self.eink_touch_var = tk.BooleanVar(value=True)
-        eink_touch_check = ttk.Checkbutton(touch_frame, text="Enable", 
-                                          variable=self.eink_touch_var,
-                                          command=self.on_eink_touch_toggled)
-        eink_touch_check.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        
-        # OLED touch control
-        ttk.Label(touch_frame, text="OLED Touch (Wacom):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        
-        self.oled_touch_var = tk.BooleanVar(value=True)
-        oled_touch_check = ttk.Checkbutton(touch_frame, text="Enable", 
-                                          variable=self.oled_touch_var,
-                                          command=self.on_oled_touch_toggled)
-        oled_touch_check.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-        
-        info_label = ttk.Label(touch_frame, text="Separate control for touch input on each display",
-                              font=('TkDefaultFont', 8))
-        info_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(5, 0))
-        
+
         # === Activity Log Section ===
         log_frame = ttk.LabelFrame(main_frame, text="Activity Log", padding="10")
         log_frame.grid(row=row, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
@@ -256,7 +222,16 @@ class EInkControlGUI:
         self.log_text.tag_config('success', foreground='green')
         self.log_text.tag_config('error', foreground='red')
         self.log_text.tag_config('info', foreground='blue')
-        
+
+        # Buy Me A Coffee button (bottom right corner)
+        coffee_btn = tk.Button(main_frame, text="Buy Me A Coffee",
+                              bg="#bcb132", fg="white",
+                              font=('TkDefaultFont', 8),
+                              relief=tk.RAISED, bd=2,
+                              command=self.on_buy_coffee,
+                              padx=8, pady=4)
+        coffee_btn.grid(row=row, column=0, sticky=tk.E, padx=10, pady=5)
+
         # Initial log message
         self.log_message("Application started")
     
@@ -495,9 +470,6 @@ class EInkControlGUI:
             self.logger.error(f"Failed to check EC status: {e}")
             self.log_message(f"Warning: Could not verify EC status: {e}", level='error')
 
-        # Sync display checkboxes with actual hardware state
-        self.sync_display_state()
-
     def sync_frontlight_state(self):
         """Query EC and update GUI to match actual frontlight state"""
         try:
@@ -522,22 +494,6 @@ class EInkControlGUI:
             self.logger.warning(f"Failed to sync frontlight state: {e}")
             self.log_message(f"Warning: Could not sync frontlight state from EC", level='error')
 
-    def sync_display_state(self):
-        """Query display manager and update GUI checkboxes to match actual display state"""
-        try:
-            # Check OLED display (eDP-1)
-            oled_active = self.display_mgr.is_display_active(self.DISPLAY_OLED)
-            self.oled_enabled_var.set(oled_active)
-            self.log_message(f"Synced OLED display ({self.DISPLAY_OLED}): {'enabled' if oled_active else 'disabled'}")
-
-            # Check E-Ink display (eDP-2)
-            eink_active = self.display_mgr.is_display_active(self.DISPLAY_EINK)
-            self.eink_display_var.set(eink_active)
-            self.log_message(f"Synced E-Ink display ({self.DISPLAY_EINK}): {'enabled' if eink_active else 'disabled'}")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to sync display state: {e}")
-            self.log_message(f"Warning: Could not sync display state: {e}", level='error')
 
     def execute_helper_command(self, command, **params):
         """Execute a command via helper and handle response"""
@@ -571,7 +527,7 @@ class EInkControlGUI:
     # === Event Handlers ===
     
     def on_eink_toggled(self):
-        """Handle E-Ink display toggle"""
+        """Handle E-Ink display toggle with automatic eDP switching"""
         enabled = self.eink_enabled_var.get()
         # Toggle the state
         enabled = not enabled
@@ -579,6 +535,18 @@ class EInkControlGUI:
         if enabled:
             # Enabling E-Ink
             self.log_message("Enabling E-Ink display...")
+
+            # Step 1: Enable E-Ink on eDP-2 first
+            self.log_message(f"Enabling E-Ink display on {self.DISPLAY_EINK} with {self.display_scale}x scale...")
+            if self.display_mgr.enable_display(self.DISPLAY_EINK, scale=self.display_scale):
+                self.log_message(f"✓ E-Ink display ({self.DISPLAY_EINK}) enabled with {self.display_scale}x scale")
+            else:
+                self.log_message(f"⚠ Failed to enable E-Ink display on {self.DISPLAY_EINK}", level='error')
+
+            # Small delay to ensure display is fully enabled
+            time.sleep(1.0)
+
+            # Step 2: Enable E-Ink via USB TCON controller
             response = self.execute_helper_command('enable-eink')
 
             if response:
@@ -586,17 +554,20 @@ class EInkControlGUI:
                 self.eink_toggle_btn.config(text="eInk Enabled", bg="green", fg="white")
                 self.update_status("E-Ink display enabled")
 
-                # Make E-Ink the primary display
-                self.log_message(f"Setting {self.DISPLAY_EINK} as primary display...")
-                if self.display_mgr.set_primary(self.DISPLAY_EINK):
-                    self.log_message(f"✓ {self.DISPLAY_EINK} is now the primary display")
+                # Small delay before disabling OLED
+                time.sleep(0.5)
+
+                # Step 4: Disable OLED display on eDP-1 as the last step
+                self.log_message(f"Disabling OLED display on {self.DISPLAY_OLED}...")
+                if self.display_mgr.disable_display(self.DISPLAY_OLED):
+                    self.log_message(f"✓ OLED display ({self.DISPLAY_OLED}) disabled")
                 else:
-                    self.log_message(f"⚠ Could not set {self.DISPLAY_EINK} as primary", level='error')
+                    self.log_message(f"⚠ Failed to disable OLED display on {self.DISPLAY_OLED}", level='error')
         else:
-            # Disabling E-Ink - display privacy image first
+            # Disabling E-Ink
             self.log_message("Preparing to disable E-Ink display...")
 
-            # Step 1: Display privacy image on E-Ink screen
+            # Step 3: Display privacy image on E-Ink screen
             image_path = self.EINK_DISABLED_IMAGE
             if not os.path.exists(image_path):
                 # Try in script directory
@@ -611,20 +582,13 @@ class EInkControlGUI:
                 )
 
                 if self.eink_image_process:
-                    # Step 2: Wait for image to fully render on E-Ink
+                    # Wait for image to fully render on E-Ink
                     self.log_message("Waiting for image to render...")
-                    time.sleep(2.0)  # Give E-Ink time to display the image
+                    time.sleep(0.5)  # Give E-Ink time to display the image
                 else:
                     self.log_message("Warning: Could not display privacy image", level='error')
             else:
                 self.log_message(f"Warning: Privacy image not found: {self.EINK_DISABLED_IMAGE}", level='error')
-
-            # Step 3: Make OLED the primary display
-            self.log_message(f"Setting {self.DISPLAY_OLED} as primary display...")
-            if self.display_mgr.set_primary(self.DISPLAY_OLED):
-                self.log_message(f"✓ {self.DISPLAY_OLED} is now the primary display")
-            else:
-                self.log_message(f"⚠ Could not set {self.DISPLAY_OLED} as primary", level='error')
 
             # Step 4: Disable E-Ink via USB controller
             self.log_message("Disabling E-Ink display via USB controller...")
@@ -635,7 +599,9 @@ class EInkControlGUI:
                 self.eink_toggle_btn.config(text="eInk Disabled", bg="yellow", fg="black")
                 self.update_status("E-Ink display disabled")
 
-                # Step 5: Kill the image viewer process (image is now persisted on E-Ink)
+                time.sleep(2.0)  # Give E-Ink time to display the image
+
+                # Kill the image viewer process (image is now persisted on E-Ink)
                 if self.eink_image_process:
                     try:
                         self.eink_image_process.terminate()
@@ -647,6 +613,23 @@ class EInkControlGUI:
                         except:
                             pass
                     self.eink_image_process = None
+
+                # Step 1: Enable OLED display on eDP-1 first
+                self.log_message(f"Enabling OLED display on {self.DISPLAY_OLED} with {self.display_scale}x scale...")
+                if self.display_mgr.enable_display(self.DISPLAY_OLED, scale=self.display_scale):
+                    self.log_message(f"✓ OLED display ({self.DISPLAY_OLED}) enabled with {self.display_scale}x scale")
+                else:
+                    self.log_message(f"⚠ Failed to enable OLED display on {self.DISPLAY_OLED}", level='error')
+
+                # Small delay to ensure OLED is fully enabled
+                time.sleep(1.0)
+
+                # Step 5: Disable E-Ink on eDP-2 as the last step
+                self.log_message(f"Disabling E-Ink display on {self.DISPLAY_EINK}...")
+                if self.display_mgr.disable_display(self.DISPLAY_EINK):
+                    self.log_message(f"✓ E-Ink display ({self.DISPLAY_EINK}) disabled")
+                else:
+                    self.log_message(f"⚠ Failed to disable E-Ink display on {self.DISPLAY_EINK}", level='error')
             else:
                 # Failed to disable - kill image viewer
                 if self.eink_image_process:
@@ -697,132 +680,42 @@ class EInkControlGUI:
         """Actually set the brightness after debounce"""
         self.log_message(f"Setting brightness to level {level}...")
         response = self.execute_helper_command('set-brightness', level=level)
-        
+
         if response:
             self.update_status(f"Brightness set to {level}")
-        
-        self.brightness_timer = None
-    
-    def on_eink_touch_toggled(self):
-        """Handle E-Ink touch toggle (Goodix touchscreen)"""
-        enabled = self.eink_touch_var.get()
-        
-        # Get touch devices
-        devices = self.wacom_mgr.get_touch_devices()
-        eink_devices = devices.get('eink', [])
-        
-        if not eink_devices:
-            self.log_message("No E-Ink touch devices found", level='error')
-            self.show_info_dialog(
-                "No E-Ink touch devices detected.\n\n"
-                "Expected: Goodix touchscreen\n"
-                "This may be normal if the device is already disabled."
-            )
-            return
-        
-        # Toggle E-Ink touch devices
-        self.log_message(f"{'Enabling' if enabled else 'Disabling'} E-Ink touch on {len(eink_devices)} device(s)...")
-        
-        success_count = 0
-        for device in eink_devices:
-            if self.wacom_mgr.set_touch_enabled(device['id'], enabled):
-                success_count += 1
-                self.log_message(f"  ✓ {'Enabled' if enabled else 'Disabled'}: {device['name']}")
-            else:
-                self.log_message(f"  ✗ Failed: {device['name']}", level='error')
-        
-        if success_count > 0:
-            self.update_status(f"E-Ink touch {'enabled' if enabled else 'disabled'} on {success_count} device(s)")
-        else:
-            self.log_message("Failed to toggle E-Ink touch devices", level='error')
-    
-    def on_oled_touch_toggled(self):
-        """Handle OLED touch toggle (Wacom pen/touch)"""
-        enabled = self.oled_touch_var.get()
-        
-        # Get touch devices
-        devices = self.wacom_mgr.get_touch_devices()
-        oled_devices = devices.get('oled', [])
-        
-        if not oled_devices:
-            self.log_message("No OLED touch devices found", level='error')
-            self.show_info_dialog(
-                "No OLED touch devices detected.\n\n"
-                "Expected: Wacom pen/touch devices\n"
-                "This may be normal if the device is already disabled."
-            )
-            return
-        
-        # Toggle OLED touch devices
-        self.log_message(f"{'Enabling' if enabled else 'Disabling'} OLED touch on {len(oled_devices)} device(s)...")
-        
-        success_count = 0
-        for device in oled_devices:
-            if self.wacom_mgr.set_touch_enabled(device['id'], enabled):
-                success_count += 1
-                self.log_message(f"  ✓ {'Enabled' if enabled else 'Disabled'}: {device['name']}")
-            else:
-                self.log_message(f"  ✗ Failed: {device['name']}", level='error')
-        
-        if success_count > 0:
-            self.update_status(f"OLED touch {'enabled' if enabled else 'disabled'} on {success_count} device(s)")
-        else:
-            self.log_message("Failed to toggle OLED touch devices", level='error')
-    
-    def on_oled_toggled(self):
-        """Handle OLED display enable/disable"""
-        enabled = self.oled_enabled_var.get()
-        
-        if enabled:
-            self.log_message(f"Enabling OLED display ({self.DISPLAY_OLED})...")
-            if self.display_mgr.enable_display(self.DISPLAY_OLED):
-                self.update_status("OLED display enabled")
-                self.log_message(f"✓ OLED display ({self.DISPLAY_OLED}) enabled")
-            else:
-                self.log_message(f"✗ Failed to enable OLED display", level='error')
-                self.oled_enabled_var.set(False)  # Revert on failure
-        else:
-            self.log_message(f"Disabling OLED display ({self.DISPLAY_OLED})...")
-            if self.display_mgr.disable_display(self.DISPLAY_OLED):
-                self.update_status("OLED display disabled")
-                self.log_message(f"✓ OLED display ({self.DISPLAY_OLED}) disabled")
-            else:
-                self.log_message(f"✗ Failed to disable OLED display", level='error')
-                self.oled_enabled_var.set(True)  # Revert on failure
-    
-    def on_eink_display_toggled(self):
-        """Handle E-Ink display enable/disable"""
-        enabled = self.eink_display_var.get()
 
-        if enabled:
-            self.log_message(f"Enabling E-Ink display ({self.DISPLAY_EINK})...")
-            if self.display_mgr.enable_display(self.DISPLAY_EINK):
-                self.update_status("E-Ink display enabled")
-                self.log_message(f"✓ E-Ink display ({self.DISPLAY_EINK}) enabled")
-            else:
-                self.log_message(f"✗ Failed to enable E-Ink display", level='error')
-                self.eink_display_var.set(False)  # Revert on failure
-        else:
-            self.log_message(f"Disabling E-Ink display ({self.DISPLAY_EINK})...")
-            if self.display_mgr.disable_display(self.DISPLAY_EINK):
-                self.update_status("E-Ink display disabled")
-                self.log_message(f"✓ E-Ink display ({self.DISPLAY_EINK}) disabled")
-            else:
-                self.log_message(f"✗ Failed to disable E-Ink display", level='error')
-                self.eink_display_var.set(True)  # Revert on failure
-    
+        self.brightness_timer = None
+
+    def on_scale_changed(self, value):
+        """Handle display scale slider change"""
+        # Round to nearest 0.05
+        scale = round(float(value) / 0.05) * 0.05
+        self.scale_var.set(scale)
+        self.display_scale = scale
+        self.scale_label.config(text=f"{scale:.2f}")
+        self.log_message(f"Display scale set to {scale:.2f}x (will apply on next display switch)")
+
+    def on_buy_coffee(self):
+        """Handle Buy Me A Coffee button click"""
+        try:
+            webbrowser.open('https://buymeacoffee.com/joncox')
+            self.log_message("Opening Buy Me A Coffee page...")
+        except Exception as e:
+            self.logger.error(f"Failed to open browser: {e}")
+            self.log_message(f"Failed to open browser: {e}", level='error')
+
     def on_closing(self):
         """Handle window close"""
         self.logger.info("Application closing")
-        
+
         # Stop keepalive
         if self.keepalive_after_id:
             self.root.after_cancel(self.keepalive_after_id)
-        
+
         # Disconnect from helper (sends shutdown command)
         if self.helper.is_connected():
             self.helper.disconnect()
-        
+
         # Terminate helper process if we launched it
         if self.helper_process:
             try:
@@ -830,7 +723,7 @@ class EInkControlGUI:
                 self.helper_process.wait(timeout=2)
             except:
                 pass
-        
+
         self.root.destroy()
 
 
