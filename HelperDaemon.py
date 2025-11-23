@@ -114,15 +114,21 @@ class HelperDaemon:
             # Initialize EC controller
             self.logger.info("Initializing EC controller")
             self.ec = ECController(self.logger)
-            
+
+            # Check if EC access is available
+            ec_status = self.ec.get_access_status()
+            if not ec_status['available']:
+                self.logger.warning(f"EC access not available: {ec_status['error_message']}")
+                # Continue anyway - E-Ink will still work
+
             # Initialize E-Ink USB controller
             self.logger.info("Initializing E-Ink USB controller")
             self.eink = EInkUSBController(self.logger)
             self.eink.connect()
-            
+
             self.logger.info("Hardware initialization complete")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Hardware initialization failed: {e}")
             return False
@@ -171,23 +177,55 @@ class HelperDaemon:
                 response['success'] = True
                 response['message'] = 'E-Ink quick refresh completed'
             
+            elif cmd == 'get-ec-status':
+                # Return EC access status
+                status = self.ec.get_access_status()
+                response['success'] = True
+                response['ec_status'] = status
+                response['message'] = 'EC status retrieved'
+
+            elif cmd == 'get-frontlight-state':
+                # Read current frontlight state from EC
+                if not self.ec.access_available:
+                    raise RuntimeError(self.ec.error_message or "EC access not available")
+
+                enabled = self.ec.get_frontlight_state()
+                brightness = self.ec.read_brightness()
+
+                response['success'] = True
+                response['frontlight_enabled'] = enabled
+                response['brightness_level'] = brightness
+                response['message'] = 'Frontlight state retrieved'
+
             elif cmd == 'enable-frontlight':
+                # Check EC access first
+                if not self.ec.access_available:
+                    raise RuntimeError(self.ec.error_message or "EC access not available")
+
                 success, readback = self.ec.enable_frontlight()
                 response['success'] = success
                 response['readback'] = f"0x{readback:02x}"
                 response['message'] = 'Frontlight enabled' if success else 'Frontlight enable failed (readback mismatch)'
-            
+
             elif cmd == 'disable-frontlight':
+                # Check EC access first
+                if not self.ec.access_available:
+                    raise RuntimeError(self.ec.error_message or "EC access not available")
+
                 success, readback = self.ec.disable_frontlight()
                 response['success'] = success
                 response['readback'] = f"0x{readback:02x}"
                 response['message'] = 'Frontlight disabled' if success else 'Frontlight disable failed (readback mismatch)'
-            
+
             elif cmd == 'set-brightness':
+                # Check EC access first
+                if not self.ec.access_available:
+                    raise RuntimeError(self.ec.error_message or "EC access not available")
+
                 level = params.get('level')
                 if level is None:
                     raise ValueError("Missing 'level' parameter")
-                
+
                 success, readback = self.ec.set_brightness(int(level))
                 response['success'] = success
                 response['readback'] = f"0x{readback:02x}"

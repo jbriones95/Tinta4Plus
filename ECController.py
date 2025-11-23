@@ -11,6 +11,7 @@ By downloading and using this software you agree to these terms and acknowledge 
 
 import time
 import portio
+import subprocess
 
 
 class ECController:
@@ -38,18 +39,123 @@ class ECController:
     
     def __init__(self, logger):
         self.logger = logger
+        self.access_available = False
+        self.secure_boot_enabled = False
+        self.error_message = None
+        self._check_secure_boot()
         self._init_ports()
     
-    def _init_ports(self):
-        """Request I/O port access (requires root)"""
+    def _check_secure_boot(self):
+        """Check if Secure Boot is enabled"""
         try:
+            result = subprocess.run(['mokutil', '--sb-state'],
+                                  capture_output=True, text=True, timeout=2)
+            output = result.stdout.strip()
+
+            if 'SecureBoot enabled' in output:
+                self.secure_boot_enabled = True
+                self.error_message = "Secure Boot is enabled. Please disable Secure Boot in BIOS settings."
+                self.logger.warning("Secure Boot is enabled - EC access will be blocked")
+            else:
+                self.logger.info(f"Secure Boot status: {output}")
+        except FileNotFoundError:
+            self.logger.warning("mokutil not found, cannot check Secure Boot status")
+        except Exception as e:
+            self.logger.warning(f"Could not check Secure Boot status: {e}")
+
+    def _init_ports(self):
+        """Request I/O port access and verify it works (requires root)"""
+        if self.secure_boot_enabled:
+            self.logger.error("Cannot initialize ports: Secure Boot is enabled")
+            self.access_available = False
+            return
+
+        try:
+            # Request port access
             portio.ioperm(self.EC_DATA_PORT, 1, 1)
             portio.ioperm(self.EC_SC_PORT, 1, 1)
             self.logger.info("EC I/O port access granted")
+
+            # Verify we can actually read from the ports (safe operation)
+            self._verify_port_access()
+
+            self.access_available = True
+            self.logger.info("EC port access verified")
+
+        except PermissionError as e:
+            self.error_message = "Permission denied. Please run as root or disable Secure Boot in BIOS."
+            self.logger.error(f"Failed to get I/O port access: {e}")
+            self.access_available = False
         except Exception as e:
-            self.logger.error(f"Failed to get I/O port access (are you root?): {e}")
-            raise
-    
+            self.error_message = f"Failed to initialize EC access: {str(e)}"
+            self.logger.error(f"Failed to get I/O port access: {e}")
+            self.access_available = False
+
+    def _verify_port_access(self):
+        """Verify port access by reading status register (safe, read-only operation)"""
+        try:
+            # Read the EC status register - this is a safe, read-only operation
+            # that won't change EC state
+            status = portio.inb(self.EC_SC_PORT)
+            self.logger.debug(f"EC status register read successfully: 0x{status:02x}")
+
+            # Try reading it a few more times to ensure consistent access
+            for _ in range(3):
+                portio.inb(self.EC_SC_PORT)
+                time.sleep(0.001)  # 1ms delay
+
+        except Exception as e:
+            raise RuntimeError(f"Port access verification failed: {e}")
+
+    def get_access_status(self):
+        """
+        Get the current EC access status.
+        Returns: dict with keys:
+            - 'available': bool, True if EC access is working
+            - 'secure_boot_enabled': bool, True if Secure Boot is enabled
+            - 'error_message': str or None, human-readable error message
+        """
+        return {
+            'available': self.access_available,
+            'secure_boot_enabled': self.secure_boot_enabled,
+            'error_message': self.error_message
+        }
+
+    def read_brightness(self):
+        """
+        Read current brightness level from EC
+        Returns: brightness level (0-8), or None if read fails
+        """
+        if not self.access_available:
+            return None
+
+        try:
+            ec_value = self.read_byte(self.REG_BRIGHTNESS)
+            # Convert EC value (0x00-0x20 in steps of 4) to level (0-8)
+            level = ec_value // 4
+            self.logger.debug(f"Read brightness: EC value=0x{ec_value:02x}, level={level}")
+            return level
+        except Exception as e:
+            self.logger.error(f"Failed to read brightness: {e}")
+            return None
+
+    def get_frontlight_state(self):
+        """
+        Read current frontlight power state from EC
+        Returns: True if enabled, False if disabled, None if read fails
+        """
+        if not self.access_available:
+            return None
+
+        try:
+            power_value = self.read_byte(self.REG_POWER)
+            self.logger.debug(f"Read frontlight power: 0x{power_value:02x}")
+            # 0x06 = enabled, 0x05 = disabled (based on your readback values)
+            return power_value == 0x06
+        except Exception as e:
+            self.logger.error(f"Failed to read frontlight state: {e}")
+            return None
+
     def _wait_ibf_clear(self):
         """Wait for input buffer to be empty"""
         waited = 0
@@ -165,10 +271,10 @@ class ECController:
         """
         self.logger.info("Enabling frontlight")
         readback = self.write_and_verify(self.REG_POWER, 0x0A)
-        success = (readback == 0x0A)
+        success = (readback == 0x06)
         
         if not success:
-            self.logger.warning(f"Frontlight enable readback mismatch: wrote 0x0A, read 0x{readback:02x}")
+            self.logger.warning(f"Frontlight enable readback mismatch: expected 0x06, read 0x{readback:02x}")
         
         return success, readback
     

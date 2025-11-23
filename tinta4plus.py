@@ -75,10 +75,13 @@ class EInkControlGUI:
     
     def build_ui(self):
         """Build the tkinter user interface"""
-        
+
         # Configure style
         style = ttk.Style()
         style.theme_use('clam')  # Modern look
+
+        # Store frontlight control widgets for enabling/disabling
+        self.frontlight_widgets = []
         
         # Main frame with padding
         main_frame = ttk.Frame(self.root, padding="10")
@@ -90,11 +93,21 @@ class EInkControlGUI:
         main_frame.columnconfigure(0, weight=1)
         
         row = 0
-        
+
         # Status bar
         self.status_var = tk.StringVar(value="Status: Initializing...")
         status_label = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_label.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        status_label.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        row += 1
+
+        # Secure Boot status indicator
+        self.secureboot_frame = tk.Frame(main_frame, bg='gray', relief=tk.RIDGE, bd=2)
+        self.secureboot_frame.grid(row=row, column=0, sticky=tk.W, pady=(0, 10))
+
+        self.secureboot_label = tk.Label(self.secureboot_frame, text="Secure Boot: Unknown",
+                                         bg='gray', fg='white', font=('TkDefaultFont', 9, 'bold'),
+                                         padx=10, pady=3)
+        self.secureboot_label.pack()
         row += 1
         
         # === Display Control Section ===
@@ -155,33 +168,41 @@ class EInkControlGUI:
         frontlight_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=5)
         frontlight_frame.columnconfigure(1, weight=1)
         row += 1
-        
+
         # Power toggle
         ttk.Label(frontlight_frame, text="Power:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        
+
         self.frontlight_var = tk.BooleanVar(value=False)
-        frontlight_check = ttk.Checkbutton(frontlight_frame, text="Enable", 
+        frontlight_check = ttk.Checkbutton(frontlight_frame, text="Enable",
                                           variable=self.frontlight_var,
                                           command=self.on_frontlight_toggled)
         frontlight_check.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        
+        self.frontlight_widgets.append(frontlight_check)
+
         # Brightness slider
-        ttk.Label(frontlight_frame, text="Brightness (0-8):").grid(row=1, column=0, 
+        ttk.Label(frontlight_frame, text="Brightness (0-8):").grid(row=1, column=0,
                                                                     sticky=tk.W, padx=5, pady=5)
-        
+
         brightness_container = ttk.Frame(frontlight_frame)
         brightness_container.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         brightness_container.columnconfigure(0, weight=1)
-        
+
         self.brightness_var = tk.IntVar(value=4)
-        self.brightness_scale = ttk.Scale(brightness_container, from_=0, to=8, 
+        self.brightness_scale = ttk.Scale(brightness_container, from_=0, to=8,
                                          orient=tk.HORIZONTAL,
                                          variable=self.brightness_var,
                                          command=self.on_brightness_changed)
         self.brightness_scale.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        
+        self.frontlight_widgets.append(self.brightness_scale)
+
         self.brightness_label = ttk.Label(brightness_container, text="4")
         self.brightness_label.grid(row=0, column=1, padx=(5, 0))
+
+        # Warning label for Secure Boot (initially hidden)
+        self.secure_boot_warning = ttk.Label(frontlight_frame,
+                                             text="⚠ Secure Boot is enabled. Frontlight controls disabled.\nPlease disable Secure Boot in BIOS (Press ENTER during boot).",
+                                             foreground='red', font=('TkDefaultFont', 9, 'bold'))
+        # Don't grid it yet - will be shown if needed
         
         # === Touch Control Section ===
         touch_frame = ttk.LabelFrame(main_frame, text="Touch Input Control", padding="10")
@@ -334,6 +355,9 @@ class EInkControlGUI:
         self.update_status("Connected to helper daemon")
         self.log_message("Helper daemon launched successfully")
         self.start_keepalive()
+
+        # Check EC status
+        self.root.after(500, self.check_ec_status)
     
     def _helper_launch_failed(self, error):
         """Called when helper launch failed"""
@@ -399,6 +423,8 @@ class EInkControlGUI:
                     self.log_message("✓ Reconnected to existing helper")
                     self.update_status("Reconnected to helper daemon")
                     self.start_keepalive()
+                    # Re-check EC status and sync frontlight state after reconnect
+                    self.root.after(500, self.check_ec_status)
                     return
             except:
                 pass
@@ -408,30 +434,108 @@ class EInkControlGUI:
         self.update_status("Launching helper daemon...")
         threading.Thread(target=self._launch_helper_thread, daemon=True).start()
     
+    def check_ec_status(self):
+        """Check EC access status and disable frontlight controls if Secure Boot enabled"""
+        try:
+            response = self.helper.send_command('get-ec-status')
+
+            if response and response.get('success'):
+                ec_status = response.get('ec_status', {})
+
+                # Update Secure Boot status indicator
+                if ec_status.get('secure_boot_enabled'):
+                    self.secureboot_label.config(text="Secure Boot: ON", bg='red')
+                    self.secureboot_frame.config(bg='red')
+                else:
+                    self.secureboot_label.config(text="Secure Boot: OFF", bg='green')
+                    self.secureboot_frame.config(bg='green')
+
+                if ec_status.get('secure_boot_enabled') or not ec_status.get('available'):
+                    # Secure Boot enabled or EC not available - disable frontlight controls
+                    error_msg = ec_status.get('error_message', 'EC access not available')
+                    self.log_message(f"⚠ {error_msg}", level='error')
+
+                    # Show warning label
+                    self.secure_boot_warning.grid(row=2, column=0, columnspan=2,
+                                                 sticky=(tk.W, tk.E), padx=5, pady=10)
+
+                    # Disable all frontlight controls
+                    for widget in self.frontlight_widgets:
+                        widget.config(state='disabled')
+
+                    # Show dialog
+                    if ec_status.get('secure_boot_enabled'):
+                        messagebox.showwarning(
+                            "Secure Boot Enabled",
+                            "Secure Boot is currently enabled in your BIOS.\n\n"
+                            "Frontlight controls require direct hardware access which is blocked by Secure Boot.\n\n"
+                            "To enable frontlight controls:\n"
+                            "1. Reboot your computer\n"
+                            "2. Press ENTER (or F2) during boot to enter BIOS\n"
+                            "3. Navigate to Security → Secure Boot\n"
+                            "4. Set Secure Boot to 'Disabled'\n"
+                            "5. Save and exit (F10)\n\n"
+                            "Note: E-Ink display controls will continue to work normally."
+                        )
+                    else:
+                        self.log_message(f"EC access not available: {error_msg}", level='error')
+                else:
+                    self.log_message("EC access verified - frontlight controls enabled")
+                    # Sync GUI with actual EC state
+                    self.sync_frontlight_state()
+
+        except Exception as e:
+            self.logger.error(f"Failed to check EC status: {e}")
+            self.log_message(f"Warning: Could not verify EC status: {e}", level='error')
+
+    def sync_frontlight_state(self):
+        """Query EC and update GUI to match actual frontlight state"""
+        try:
+            response = self.helper.send_command('get-frontlight-state')
+
+            if response and response.get('success'):
+                enabled = response.get('frontlight_enabled')
+                brightness = response.get('brightness_level')
+
+                if enabled is not None:
+                    # Temporarily disable the callback to avoid triggering commands
+                    old_callback = self.frontlight_var.trace_info()
+                    self.frontlight_var.set(enabled)
+                    self.log_message(f"Synced frontlight power: {'ON' if enabled else 'OFF'}")
+
+                if brightness is not None:
+                    self.brightness_var.set(brightness)
+                    self.brightness_label.config(text=str(brightness))
+                    self.log_message(f"Synced brightness level: {brightness}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to sync frontlight state: {e}")
+            self.log_message(f"Warning: Could not sync frontlight state from EC", level='error')
+
     def execute_helper_command(self, command, **params):
         """Execute a command via helper and handle response"""
         if not self.helper.is_connected():
             self.show_error_dialog("Not connected to helper daemon")
             return None
-        
+
         try:
             response = self.helper.send_command(command, **params)
-            
+
             if response and response.get('success'):
                 message = response.get('message', 'Command completed')
                 self.log_message(f"✓ {message}")
-                
+
                 # Log readback value if present
                 if 'readback' in response:
                     self.log_message(f"  Readback value: {response['readback']}")
-                
+
                 return response
             else:
                 error = response.get('error', 'Unknown error') if response else 'No response'
                 self.log_message(f"✗ Command failed: {error}", level='error')
                 self.show_error_dialog(f"Command failed:\n\n{error}")
                 return None
-                
+
         except Exception as e:
             self.log_message(f"✗ Command error: {e}", level='error')
             self.show_error_dialog(f"Command error:\n\n{e}")
