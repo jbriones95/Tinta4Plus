@@ -48,6 +48,11 @@ class FloatingRefreshButton:
         self.on_refresh_callback = on_refresh_callback
         self.logger = logger
 
+        # Drag state
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+        self._is_dragging = False
+
         # Create a new top-level window
         self.window = tk.Toplevel(parent)
         self.window.title("")  # Empty title
@@ -55,8 +60,8 @@ class FloatingRefreshButton:
         # Remove window decorations (titlebar, close button, etc.)
         self.window.overrideredirect(True)
 
-        # Set size
-        self.window.geometry("100x100")
+        # Set size to 75x75
+        self.window.geometry("75x75")
 
         # Make window always stay on top
         self.window.attributes('-topmost', True)
@@ -67,10 +72,10 @@ class FloatingRefreshButton:
         # Position window on left side, halfway down
         # Get screen height to calculate vertical center
         screen_height = self.window.winfo_screenheight()
-        y_position = (screen_height // 2) - 50  # Center the 100px button
+        y_position = (screen_height // 2) - 37  # Center the 75px button
         x_position = 0  # Left edge of screen
 
-        self.window.geometry(f"100x100+{x_position}+{y_position}")
+        self.window.geometry(f"75x75+{x_position}+{y_position}")
 
         # Set window background to light blue
         self.window.config(bg='lightblue')
@@ -81,7 +86,7 @@ class FloatingRefreshButton:
         self.button = tk.Button(
             self.window,
             text="⟳",  # Circular arrow refresh symbol
-            font=('TkDefaultFont', 72),
+            font=('TkDefaultFont', 54),  # Scaled down from 72 to fit 75x75
             command=self._on_click,
             relief=tk.FLAT,
             bd=0,
@@ -95,13 +100,51 @@ class FloatingRefreshButton:
         self.button.bind("<Enter>", self._on_hover_enter)
         self.button.bind("<Leave>", self._on_hover_leave)
 
+        # Bind drag events
+        self.button.bind("<ButtonPress-1>", self._on_drag_start)
+        self.button.bind("<B1-Motion>", self._on_drag_motion)
+        self.button.bind("<ButtonRelease-1>", self._on_drag_release)
+
         self.logger.info("Floating refresh button created")
 
     def _on_click(self):
-        """Handle button click"""
-        self.logger.info("Floating refresh button clicked")
-        if self.on_refresh_callback:
-            self.on_refresh_callback()
+        """Handle button click (only if not dragging)"""
+        if not self._is_dragging:
+            self.logger.info("Floating refresh button clicked")
+            if self.on_refresh_callback:
+                self.on_refresh_callback()
+
+    def _on_drag_start(self, event):
+        """Handle start of drag operation"""
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+        self._is_dragging = False
+
+    def _on_drag_motion(self, event):
+        """Handle drag motion"""
+        # Calculate distance moved
+        dx = event.x - self._drag_start_x
+        dy = event.y - self._drag_start_y
+
+        # If moved more than a few pixels, consider it a drag (not a click)
+        if abs(dx) > 3 or abs(dy) > 3:
+            self._is_dragging = True
+
+            # Get current window position
+            x = self.window.winfo_x() + dx
+            y = self.window.winfo_y() + dy
+
+            # Move the window
+            self.window.geometry(f"+{x}+{y}")
+
+    def _on_drag_release(self, _event):
+        """Handle end of drag operation"""
+        # Reset drag flag after a short delay to prevent click from firing
+        self.window.after(100, self._reset_drag_flag)
+
+    def _reset_drag_flag(self):
+        """Reset the dragging flag"""
+        self._is_dragging = False
 
     def _on_hover_enter(self, event):
         """Handle mouse hover enter"""
