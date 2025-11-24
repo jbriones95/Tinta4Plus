@@ -63,6 +63,6 @@ Should unexpected behvior occur, usually a full reboot will resolve the issue. I
 
 1. Power off the laptop and disconnect the AC power adapter.
 2. Use a pin, small paperclick or SIM card ejector tool to press and HOLD the small reset button for AT LEAST 60 seconds (time with a clock!). The reset button is located on the bottom of the laptop just to one side of the fan vent grille and looks like an extra, out of place hole. It has a tiny symbol that looks like an arch with an arrow on one end.
-3. After holding the reset for 60 seconds, press and HOLD the power button continusouly for 60 seconds.
+3. After holding the reset for 60 seconds, press and HOLD the power button continuously for 60 seconds.
 4. Lastly, press the power button normally (may require a few presses or waiting some seconds) to power up the laptop. Typically, the screen will stay blank for some time, often up to 60 seconds, before the laptop powers up normally.
 5. Check your BIOS settings by pressing ENTER at boot to ensure Secure Boot is disabled again.
